@@ -1,150 +1,258 @@
-# Sequence Diagram - Create Trip Flow
+
+## Create Trip
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Express as TripRoutes
+    participant Express as Express Router
     participant Controller as TripController
     participant Service as TripService
     participant RiderRepo as RiderRepository
     participant DriverRepo as DriverRepository
+    participant TripRepo as TripRepository
     participant Matching as DriverMatchingStrategy
     participant Pricing as PricingStrategy
-    participant TripRepo as TripRepository
+    participant Trip
+    participant Driver
+    participant Error as App Error Middleware
 
-    Note over Client, Express: POST /trips<br/>{riderId, origin, destination, seats}
+    Client->>Express: POST /trips { riderId, origin, destination, seats }
+    Express->>Controller: createTrip(req, res, next)
+    Controller->>Controller: parsePositiveInteger(body.riderId/origin/destination/seats)
 
-    Client->>+Express: POST /trips (riderId, origin, destination, seats)
-    Express->>+Controller: createTrip(riderId, origin, destination, seats)
-    Controller->>+Service: createTrip(riderId, origin, destination, seats)
+    alt Request parsing fails
+        Controller->>Error: next(error)
+        Error-->>Express: 400 { error: error.message }
+        Express-->>Client: 400 { error: error.message }
+    else Parsed successfully
+        Controller->>Service: createTrip(riderId, origin, destination, seats)
+        Service->>Service: validateLocations(origin, destination)
 
-    Service->>Service: validateLocations(origin, destination)
-    alt Invalid locations
-        Service-->>Controller: throw InvalidRideParamException
-        Controller-->>Express: 400 Bad Request
-        Express-->>Client: { error: "Invalid location" }
-    end
+        alt Origin or destination invalid, or origin >= destination
+            Service-->>Controller: throw InvalidRideParamException
+            Controller->>Error: next(error)
+            Error-->>Express: 400 { error: error.message }
+            Express-->>Client: 400 { error: error.message }
+        else Ride params valid
+            Service->>RiderRepo: findById(riderId)
 
-    Service->>RiderRepo: findById(riderId)
-    alt Rider not found
-        RiderRepo-->>Service: undefined
-        Service-->>Controller: throw TripNotFoundException
-        Controller-->>Express: 404 Not Found
-        Express-->>Client: { error: "Rider not found" }
-    else Rider found
-        RiderRepo-->>Service: Rider
+            alt Rider not found
+                RiderRepo-->>Service: undefined
+                Service-->>Controller: throw TripNotFoundException
+                Controller->>Error: next(error)
+                Error-->>Express: 400 { error: error.message }
+                Express-->>Client: 400 { error: error.message }
+            else Rider found
+                RiderRepo-->>Service: Rider
+                Service->>DriverRepo: findAll()
+                DriverRepo-->>Service: Driver[]
+                Service->>Service: filter drivers with driver.isAvailable()
+                Service->>Matching: findDriver(rider, availableDrivers, origin, destination)
 
-        Service->>DriverRepo: findAll()
-        DriverRepo-->>Service: drivers[]
+                alt No driver selected
+                    Matching-->>Service: undefined
+                    Service-->>Controller: throw DriverNotFoundException
+                    Controller->>Error: next(error)
+                    Error-->>Express: 400 { error: error.message }
+                    Express-->>Client: 400 { error: error.message }
+                else Driver selected
+                    Matching-->>Service: Driver
+                    Service->>TripRepo: findByRiderId(riderId)
+                    TripRepo-->>Service: Trip[]
 
-        Service->>Matching: findDriver(rider, availableDrivers, origin, destination)
-        alt No driver available
-            Matching-->>Service: undefined
-            Service-->>Controller: throw DriverNotFoundException
-            Controller-->>Express: 404 Not Found
-            Express-->>Client: { error: "Driver not found" }
-        else Driver found
-            Matching-->>Service: Driver
+                    alt Trip history count >= 10
+                        Service->>Pricing: calculateFareForPreferred(origin, destination, seats)
+                        Pricing-->>Service: fare
+                    else Trip history count < 10
+                        Service->>Pricing: calculateFare(origin, destination, seats)
+                        Pricing-->>Service: fare
+                    end
 
-            Service->>Pricing: calculateFare(origin, destination, seats)
-            alt Preferred rider (>10 trips)
-                Pricing-->>Service: fare (discounted)
-            else Regular rider
-                Pricing-->>Service: fare (standard)
+                    Service->>Trip: new Trip(rider, driver, origin, destination, seats, fare)
+                    Service->>TripRepo: save(riderId, trip)
+                    TripRepo-->>Service: void
+                    Service->>Driver: setCurrentTrip(trip)
+                    Service->>DriverRepo: update(driver)
+                    DriverRepo-->>Service: void
+                    Service-->>Controller: tripId
+                    Controller-->>Express: 201 { tripId }
+                    Express-->>Client: 201 { tripId }
+                end
             end
-
-            Service->>Trip: new Trip(rider, driver, origin, destination, seats, fare)
-            Service->>TripRepo: save(riderId, trip)
-            TripRepo-->>Service: saved
-
-            Service->>Driver: setCurrentTrip(trip)
-            Service->>DriverRepo: update(driver)
-            DriverRepo-->>Service: updated
-
-            Service-->>Controller: tripId
-            Controller-->>Express: 201 Created { tripId }
-            Express-->>Client: { tripId: "uuid" }
         end
     end
 ```
 
-## Complete Trip Lifecycle
+## Update Trip
 
 ```mermaid
 sequenceDiagram
-    participant Rider
-    participant System as TripRoutes
-    participant Controller
-    participant Service
+    participant Client
+    participant Express as Express Router
+    participant Controller as TripController
+    participant Service as TripService
+    participant TripRepo as TripRepository
+    participant Pricing as PricingStrategy
+    participant Trip
+    participant Error as App Error Middleware
 
-    Note over Rider, System: --- UPDATE TRIP ---<br/>PATCH /trips/:tripId
+    Client->>Express: PATCH /trips/:tripId { origin, destination, seats }
+    Express->>Controller: updateTrip(req, res, next)
+    Controller->>Controller: parsePositiveInteger(body.origin/destination/seats)
+    Controller->>Controller: parseRequiredString(params.tripId)
 
-    Rider->>+System: PATCH /trips/:tripId (origin, destination, seats)
-    System->>+Controller: updateTrip(tripId, origin, destination, seats)
-    Controller->>+Service: updateTrip(tripId, origin, destination, seats)
-    alt Trip not found or completed/withdrawn
-        Service-->>Controller: throw TripNotFoundException / TripStatusException
-        Controller-->>System: 404/400
-        System-->>Rider: { error }
-    else Success
-        Service-->>Controller: success
-        Controller-->>System: 200 OK
-        System-->>Rider: { message: "Trip updated" }
+    alt Request parsing fails
+        Controller->>Error: next(error)
+        Error-->>Express: 400 { error: error.message }
+        Express-->>Client: 400 { error: error.message }
+    else Parsed successfully
+        Controller->>Service: updateTrip(tripId, origin, destination, seats)
+        Service->>Service: validateLocations(origin, destination)
+
+        alt Origin or destination invalid, or origin >= destination
+            Service-->>Controller: throw InvalidRideParamException
+            Controller->>Error: next(error)
+            Error-->>Express: 400 { error: error.message }
+            Express-->>Client: 400 { error: error.message }
+        else Ride params valid
+            Service->>TripRepo: findById(tripId)
+
+            alt Trip not found
+                TripRepo-->>Service: undefined
+                Service-->>Controller: throw TripNotFoundException
+                Controller->>Error: next(error)
+                Error-->>Express: 400 { error: error.message }
+                Express-->>Client: 400 { error: error.message }
+            else Trip found
+                TripRepo-->>Service: Trip
+
+                alt trip.status is COMPLETED or WITHDRAWN
+                    Service-->>Controller: throw TripStatusException
+                    Controller->>Error: next(error)
+                    Error-->>Express: 400 { error: error.message }
+                    Express-->>Client: 400 { error: error.message }
+                else Trip is IN_PROGRESS
+                    Service->>TripRepo: findByRiderId(trip.getRider().getId())
+                    TripRepo-->>Service: Trip[]
+
+                    alt Trip history count >= 10
+                        Service->>Pricing: calculateFareForPreferred(origin, destination, seats)
+                        Pricing-->>Service: fare
+                    else Trip history count < 10
+                        Service->>Pricing: calculateFare(origin, destination, seats)
+                        Pricing-->>Service: fare
+                    end
+
+                    Service->>Trip: updateTrip(origin, destination, seats, fare)
+                    Service->>TripRepo: update(trip)
+                    TripRepo-->>Service: void
+                    Controller-->>Express: 200 { message: "Trip updated" }
+                    Express-->>Client: 200 { message: "Trip updated" }
+                end
+            end
+        end
     end
 ```
 
-```mermaid
-sequenceDiagram
-    participant Rider
-    participant System as TripRoutes
-    participant Controller
-    participant Service
-
-    Note over Rider, System: --- WITHDRAW TRIP ---<br/>POST /trips/:tripId/withdraw
-
-    Rider->>+System: POST /trips/:tripId/withdraw
-    System->>+Controller: withdrawTrip(tripId)
-    Controller->>+Service: withdrawTrip(tripId)
-    alt Trip not found or completed
-        Service-->>Controller: throw TripNotFoundException / TripStatusException
-        Controller-->>System: 404/400
-        System-->>Rider: { error }
-    else Success
-        Service->>Driver: setCurrentTrip(null)
-        Service->>Trip: withdrawTrip()
-        Service->>TripRepo: update(trip)
-        Service->>DriverRepo: update(driver)
-        Service-->>Controller: success
-        Controller-->>System: 200 OK
-        System-->>Rider: { message: "Trip withdrawn" }
-    end
-```
+## Withdraw Trip
 
 ```mermaid
 sequenceDiagram
+    participant Client
+    participant Express as Express Router
+    participant Controller as TripController
+    participant Service as TripService
+    participant TripRepo as TripRepository
+    participant DriverRepo as DriverRepository
+    participant Trip
     participant Driver
-    participant System as DriverRoutes
-    participant Controller
-    participant Service
+    participant Error as App Error Middleware
 
-    Note over Driver, System: --- END TRIP ---<br/>POST /drivers/:driverId/end-trip
+    Client->>Express: POST /trips/:tripId/withdraw
+    Express->>Controller: withdrawTrip(req, res, next)
+    Controller->>Controller: parseRequiredString(params.tripId)
 
-    Driver->>+System: POST /drivers/:driverId/end-trip
-    System->>+Controller: endTrip(driverId)
-    Controller->>+Service: endTrip(driverId)
-    alt Driver not found or no active trip
-        Service-->>Controller: throw TripNotFoundException
-        Controller-->>System: 404
-        System-->>Driver: { error }
-    else Success
-        Service->>Trip: endTrip()
-        Service->>Driver: setCurrentTrip(null)
-        Service->>TripRepo: update(trip)
-        Service->>DriverRepo: update(driver)
-        Service-->>Controller: fare
-        Controller-->>System: 200 OK
-        System-->>Driver: { fare: 200.00 }
+    alt Request parsing fails
+        Controller->>Error: next(error)
+        Error-->>Express: 400 { error: error.message }
+        Express-->>Client: 400 { error: error.message }
+    else Parsed successfully
+        Controller->>Service: withdrawTrip(tripId)
+        Service->>TripRepo: findById(tripId)
+
+        alt Trip not found
+            TripRepo-->>Service: undefined
+            Service-->>Controller: throw TripNotFoundException
+            Controller->>Error: next(error)
+            Error-->>Express: 400 { error: error.message }
+            Express-->>Client: 400 { error: error.message }
+        else Trip found
+            TripRepo-->>Service: Trip
+
+            alt trip.status is COMPLETED
+                Service-->>Controller: throw TripStatusException
+                Controller->>Error: next(error)
+                Error-->>Express: 400 { error: error.message }
+                Express-->>Client: 400 { error: error.message }
+            else trip.status is IN_PROGRESS or WITHDRAWN
+                Service->>Driver: setCurrentTrip(null)
+                Service->>Trip: withdrawTrip()
+                Service->>TripRepo: update(trip)
+                TripRepo-->>Service: void
+                Service->>DriverRepo: update(driver)
+                DriverRepo-->>Service: void
+                Controller-->>Express: 200 { message: "Trip withdrawn" }
+                Express-->>Client: 200 { message: "Trip withdrawn" }
+            end
+        end
     end
 ```
 
+## End Trip
 
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Express as Express Router
+    participant Controller as DriverController
+    participant Service as TripService
+    participant DriverRepo as DriverRepository
+    participant TripRepo as TripRepository
+    participant Trip
+    participant Driver
+    participant Error as App Error Middleware
+
+    Client->>Express: POST /drivers/:driverId/end-trip
+    Express->>Controller: endTrip(req, res, next)
+    Controller->>Controller: parsePositiveInteger(params.driverId)
+
+    alt Request parsing fails
+        Controller->>Error: next(error)
+        Error-->>Express: 400 { error: error.message }
+        Express-->>Client: 400 { error: error.message }
+    else Parsed successfully
+        Controller->>Service: endTrip(driverId)
+        Service->>DriverRepo: findById(driverId)
+
+        alt Driver not found, or currentTrip is null
+            DriverRepo-->>Service: undefined or Driver(currentTrip = null)
+            Service-->>Controller: throw TripNotFoundException
+            Controller->>Error: next(error)
+            Error-->>Express: 400 { error: error.message }
+            Express-->>Client: 400 { error: error.message }
+        else Driver with active trip
+            DriverRepo-->>Service: Driver(currentTrip != null)
+            Service->>Trip: getFare()
+            Trip-->>Service: fare
+            Service->>Trip: endTrip()
+            Service->>Driver: setCurrentTrip(null)
+            Service->>TripRepo: update(currentTrip)
+            TripRepo-->>Service: void
+            Service->>DriverRepo: update(driver)
+            DriverRepo-->>Service: void
+            Service-->>Controller: fare
+            Controller-->>Express: 200 { fare }
+            Express-->>Client: 200 { fare }
+        end
+    end
+```

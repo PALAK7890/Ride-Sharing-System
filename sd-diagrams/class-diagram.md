@@ -1,170 +1,244 @@
-# Class Diagram - Ride Sharing System
+# Class Diagram
 
 ```mermaid
 classDiagram
-    %% ROUTES
+    class App {
+        +app: express.Application
+        +port: string | number
+        +startServer(): void
+        -initializeMiddlewares(): void
+        -initializeRoutes(routes: Routes[]): void
+        -initializeDocs(): void
+        -initializeErrorHandling(): void
+    }
+
+    class Routes {
+        <<interface>>
+        +path?: string
+        +router: Router
+    }
+
     class DriverRoutes {
-        +configureRoutes() Router
+        +path?: string = /drivers
+        +router: Router
+        -driverController: DriverController
+        -initializeRoutes(): void
     }
+
     class RiderRoutes {
-        +configureRoutes() Router
+        +path?: string = /riders
+        +router: Router
+        -riderController: RiderController
+        -initializeRoutes(): void
     }
+
     class TripRoutes {
-        +configureRoutes() Router
+        +path?: string = /trips
+        +router: Router
+        -tripController: TripController
+        -initializeRoutes(): void
     }
+
     class SystemRoutes {
-        +configureRoutes() Router
+        +path?: string = /
+        +router: Router
+        -systemController: SystemController
+        -initializeRoutes(): void
     }
 
-    %% CONTROLLERS
     class DriverController {
-        +createDriver(req, res, next)
-        +updateDriverAvailability(req, res, next)
-        +getAvailableDrivers(req, res, next)
-        +endTrip(req, res, next)
+        -driverService: DriverService
+        -tripService: TripService
+        +createDriver(req, res, next): Promise~void~
+        +updateDriverAvailability(req, res, next): Promise~void~
+        +getAvailableDrivers(req, res, next): Promise~void~
+        +endTrip(req, res, next): Promise~void~
     }
+
     class RiderController {
-        +createRider(req, res, next)
-        +getRider(req, res, next)
-        +getTripHistory(req, res, next)
+        -riderService: RiderService
+        -tripService: TripService
+        +createRider(req, res, next): Promise~void~
+        +getRider(req, res, next): Promise~void~
+        +getTripHistory(req, res, next): Promise~void~
     }
+
     class TripController {
-        +createTrip(req, res, next)
-        +updateTrip(req, res, next)
-        +withdrawTrip(req, res, next)
+        -tripService: TripService
+        +createTrip(req, res, next): Promise~void~
+        +updateTrip(req, res, next): Promise~void~
+        +withdrawTrip(req, res, next): Promise~void~
     }
+
     class SystemController {
-        +health(req, res, next)
-        +openApi(req, res, next)
+        +health(req, res): void
+        +openApi(req, res): void
     }
 
-    %% SERVICES
     class DriverService {
-        +register(driver)
-        +updateAvailability(driverId, available)
-        +getAvailableDrivers() Driver[]
-        +getDriver(driverId) Driver
+        -driverRepository: DriverRepository
+        +register(driver: Driver): Promise~void~
+        +updateAvailability(driverId: number, available: boolean): Promise~void~
+        +getAvailableDrivers(): Promise~Driver[]~
+        +getDriver(driverId: number): Promise~Driver~
     }
+
     class RiderService {
-        +register(rider)
-        +getRider(riderId) Rider
+        -riderRepository: RiderRepository
+        +register(rider: Rider): Promise~void~
+        +getRider(riderId: number): Promise~Rider~
     }
+
     class TripService {
-        +createTrip(riderId, origin, destination, seats)
-        +updateTrip(tripId, origin, destination, seats)
-        +withdrawTrip(tripId)
-        +endTrip(driverId) fare
-        +tripHistory(riderId) Trip[]
+        -tripRepository: TripRepository
+        -riderRepository: RiderRepository
+        -driverRepository: DriverRepository
+        -pricingStrategy: PricingStrategy
+        -driverMatchingStrategy: DriverMatchingStrategy
+        +createTrip(riderId: number, origin: number, destination: number, seats: number): Promise~string~
+        +updateTrip(tripId: string, origin: number, destination: number, seats: number): Promise~void~
+        +withdrawTrip(tripId: string): Promise~void~
+        +endTrip(driverId: number): Promise~number~
+        +tripHistory(riderId: number): Promise~Trip[]~
+        -calculateFare(riderId: number, origin: number, destination: number, seats: number): Promise~number~
+        -isPreferredRider(riderId: number): Promise~boolean~
+        -validateLocations(origin: number, destination: number): void
+        -formatLocationOptions(options: Record~number, string~): string
     }
 
-    %% STRATEGY FACTORY
     class StrategyFactory {
-        +createPricingStrategy(type) PricingStrategy
-        +createDriverMatchingStrategy(type) DriverMatchingStrategy
+        +createPricingStrategy(type = default): PricingStrategy
+        +createDriverMatchingStrategy(type = optimal): DriverMatchingStrategy
     }
 
-    %% STRATEGIES
-    class PricingStrategy <<interface>> {
-        +calculateFare(origin, destination, seats)
-        +calculateFareForPreferred(origin, destination, seats)
+    class PricingStrategy {
+        <<interface>>
+        +calculateFare(origin: number, destination: number, seats: number): number
+        +calculateFareForPreferred(origin: number, destination: number, seats: number): number
     }
+
     class DefaultPricingStrategy {
-        +calculateFare(origin, destination, seats)
-        +calculateFareForPreferred(origin, destination, seats)
+        +calculateFare(origin: number, destination: number, seats: number): number
+        +calculateFareForPreferred(origin: number, destination: number, seats: number): number
     }
-    class DriverMatchingStrategy <<interface>> {
-        +findDriver(rider, drivers, origin, destination)
+
+    class DriverMatchingStrategy {
+        <<interface>>
+        +findDriver(rider: Rider, nearByDrivers: Driver[], origin: number, destination: number): Driver | undefined
     }
+
     class OptimalDriverStrategy {
-        +findDriver(rider, drivers, origin, destination)
+        +findDriver(rider: Rider, nearByDrivers: Driver[], origin: number, destination: number): Driver | undefined
     }
 
-    %% REPOSITORY INTERFACES
-    class DriverRepository <<interface>> {
-        +findById(driverId)
-        +findAll() Driver[]
-        +save(driver)
-        +update(driver)
-    }
-    class RiderRepository <<interface>> {
-        +findById(riderId) Rider
-        +save(rider)
-    }
-    class TripRepository <<interface>> {
-        +save(riderId, trip)
-        +update(trip)
-        +findById(tripId) Trip
-        +findByRiderId(riderId) Trip[]
+    class DriverRepository {
+        <<interface>>
+        +save(driver: Driver): Promise~void~
+        +update(driver: Driver): Promise~void~
+        +findById(id: number): Promise~Driver | undefined~
+        +findAll(): Promise~Driver[]~
     }
 
-    %% REPOSITORY IMPLEMENTATIONS
+    class RiderRepository {
+        <<interface>>
+        +save(rider: Rider): Promise~void~
+        +findById(id: number): Promise~Rider | undefined~
+    }
+
+    class TripRepository {
+        <<interface>>
+        +save(riderId: number, trip: Trip): Promise~void~
+        +update(trip: Trip): Promise~void~
+        +findById(tripId: string): Promise~Trip | undefined~
+        +findByRiderId(riderId: number): Promise~Trip[]~
+    }
+
+    class PostgresDatabase {
+        -instance: PostgresDatabase | null = null
+        -connectionString: string
+        -pool: Pool
+        +getInstance(connectionString: string): PostgresDatabase
+        +query(text: string, params: unknown[]): Promise~QueryResult~
+        +initializeSchema(): Promise~void~
+        +close(): Promise~void~
+    }
+
     class PostgresDriverRepository {
-        +findById(driverId)
-        +findAll() Driver[]
-        +save(driver)
-        +update(driver)
-    }
-    class PostgresRiderRepository {
-        +findById(riderId) Rider
-        +save(rider)
-    }
-    class PostgresTripRepository {
-        +save(riderId, trip)
-        +update(trip)
-        +findById(tripId) Trip
-        +findByRiderId(riderId) Trip[]
+        -db: PostgresDatabase
+        +save(driver: Driver): Promise~void~
+        +update(driver: Driver): Promise~void~
+        +findById(id: number): Promise~Driver | undefined~
+        +findAll(): Promise~Driver[]~
+        -toTripStatus(status: string): TripStatus
     }
 
-    %% DOMAIN MODELS
+    class PostgresRiderRepository {
+        -db: PostgresDatabase
+        +save(rider: Rider): Promise~void~
+        +findById(id: number): Promise~Rider | undefined~
+    }
+
+    class PostgresTripRepository {
+        -db: PostgresDatabase
+        +save(riderId: number, trip: Trip): Promise~void~
+        +update(trip: Trip): Promise~void~
+        +findById(tripId: string): Promise~Trip | undefined~
+        +findByRiderId(riderId: number): Promise~Trip[]~
+        -mapTrip(row): Trip
+        -toTripStatus(status: string): TripStatus
+    }
+
     class Driver {
-        -id: int
+        -id: number
         -name: string
-        -currentTrip: Trip | null
-        -isAcceptingRider: boolean
-        +getId() int
-        +getName() string
-        +getCurrentTrip() Trip | null
-        +getAcceptingRider() boolean
-        +setCurrentTrip(trip)
-        +setAcceptingRider(bool)
-        +isAvailable() boolean
+        -currentTrip: Trip | null = null
+        -isAcceptingRider: boolean = true
+        +getId(): number
+        +getCurrentTrip(): Trip | null
+        +getName(): string
+        +getAcceptingRider(): boolean
+        +setCurrentTrip(currentTrip: Trip | null): void
+        +setAcceptingRider(isAcceptingRider: boolean): void
+        +isAvailable(): boolean
     }
+
     class Rider {
-        -id: int
+        -id: number
         -name: string
-        +getId() int
-        +getName() string
+        +getId(): number
+        +getName(): string
     }
+
     class Trip {
         -id: string
         -rider: Rider
         -driver: Driver
-        -origin: int
-        -destination: int
-        -seats: int
+        -origin: number
+        -destination: number
+        -seats: number
         -fare: number
         -status: TripStatus
-        +getId() string
-        +getRider() Rider
-        +getDriver() Driver
-        +getOrigin() int
-        +getDestination() int
-        +getSeats() int
-        +getFare() number
-        +getStatus() TripStatus
-        +updateTrip(origin, destination, seats, fare)
-        +endTrip()
-        +withdrawTrip()
-        +fromPersistence(...)
+        +getId(): string
+        +getRider(): Rider
+        +getDriver(): Driver
+        +getFare(): number
+        +getOrigin(): number
+        +getDestination(): number
+        +getSeats(): number
+        +getStatus(): TripStatus
+        +updateTrip(origin: number, destination: number, seats: number, fare: number): void
+        +endTrip(): void
+        +withdrawTrip(): void
+        +fromPersistence(id: string, rider: Rider, driver: Driver, origin: number, destination: number, seats: number, fare: number, status: TripStatus): Trip
     }
+
     class TripStatus {
         <<enum>>
         IN_PROGRESS
-        COMPLETED
         WITHDRAWN
+        COMPLETED
     }
 
-    %% EXCEPTIONS
     class DriverAlreadyPresentException
     class DriverNotFoundException
     class InvalidRideParamException
@@ -172,11 +246,19 @@ classDiagram
     class RiderNotFoundException
     class TripNotFoundException
     class TripStatusException
+    class Error
 
-    %% RELATIONSHIPS
-    DriverRoutes --> DriverController
-    RiderRoutes --> RiderController
-    TripRoutes --> TripController
+    Routes <|.. DriverRoutes
+    Routes <|.. RiderRoutes
+    Routes <|.. TripRoutes
+    Routes <|.. SystemRoutes
+
+    App --> Routes : registers routers
+
+    DriverRoutes *-- DriverController
+    RiderRoutes *-- RiderController
+    TripRoutes *-- TripController
+    SystemRoutes *-- SystemController
 
     DriverController --> DriverService
     DriverController --> TripService
@@ -192,25 +274,41 @@ classDiagram
     TripService --> PricingStrategy
     TripService --> DriverMatchingStrategy
 
-    DriverRepository <|.. PostgresDriverRepository
-    RiderRepository <|.. PostgresRiderRepository
-    TripRepository <|.. PostgresTripRepository
+    StrategyFactory ..> DefaultPricingStrategy : instantiates
+    StrategyFactory ..> OptimalDriverStrategy : instantiates
+    StrategyFactory ..> PricingStrategy : returns
+    StrategyFactory ..> DriverMatchingStrategy : returns
 
     PricingStrategy <|.. DefaultPricingStrategy
     DriverMatchingStrategy <|.. OptimalDriverStrategy
 
-    Trip --> Driver
-    Trip --> Rider
+    DriverRepository <|.. PostgresDriverRepository
+    RiderRepository <|.. PostgresRiderRepository
+    TripRepository <|.. PostgresTripRepository
+
+    PostgresDriverRepository --> PostgresDatabase
+    PostgresRiderRepository --> PostgresDatabase
+    PostgresTripRepository --> PostgresDatabase
+
+    Driver "1" --> "0..1" Trip : currentTrip
+    Trip "1" --> "1" Driver : driver
+    Trip "1" --> "1" Rider : rider
     Trip --> TripStatus
 
     DriverService ..> DriverAlreadyPresentException
     DriverService ..> DriverNotFoundException
     RiderService ..> RiderAlreadyPresentException
     RiderService ..> RiderNotFoundException
+    TripService ..> DriverNotFoundException
+    TripService ..> InvalidRideParamException
     TripService ..> TripNotFoundException
     TripService ..> TripStatusException
-    TripService ..> InvalidRideParamException
-    TripService ..> DriverNotFoundException
+
+    Error <|-- DriverAlreadyPresentException
+    Error <|-- DriverNotFoundException
+    Error <|-- InvalidRideParamException
+    Error <|-- RiderAlreadyPresentException
+    Error <|-- RiderNotFoundException
+    Error <|-- TripNotFoundException
+    Error <|-- TripStatusException
 ```
-
-

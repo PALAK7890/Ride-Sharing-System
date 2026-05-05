@@ -1,3 +1,4 @@
+
 # ER Diagram - Ride Sharing System
 
 ```mermaid
@@ -37,7 +38,13 @@ erDiagram
 | Rider → Trip | One-to-Many | A rider can book multiple trips |
 | Driver → Trip | One-to-Many | A driver can serve multiple trips |
 
-## Database Indexes
+## Relationship Semantics
+
+- `TRIPS` has total participation in both relationships because `rider_id` and `driver_id` are `NOT NULL`
+- `RIDERS` has partial participation because a rider may exist without any trips
+- `DRIVERS` has partial participation because a driver may exist without any trips
+
+## Indexes Created By Schema
 
 - `idx_trips_rider_id` on `trips(rider_id)`
 - `idx_trips_driver_id` on `trips(driver_id)`
